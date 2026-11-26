@@ -1,6 +1,6 @@
 import {freshGame,COUNTERS,levelFor,worldFor,startMap,loot,gainXP,tale,combatRemaining} from './adventure-engine.js';
 import {nextSeed,REGIONS,ENEMIES,approachPath} from './adventure-world.js';
-import {findPath,isWalkable} from './demo-world.js';
+import {isWalkable} from './demo-world.js';
 export const SAVE_KEY='infinite-adventure-v2';
 export function encode(s,now=Date.now()){return JSON.stringify({version:2,savedAt:now,state:s},(key,value)=>typeof value==='bigint'?{integer:String(value)}:value instanceof Set?{set:[...value]}:value);}
 export function decode(raw,now=Date.now()){

@@ -1,10 +1,9 @@
 import {loadArt,prefetchRegion} from './game-assets.js';
 import {readSave} from './adventure-storage.js';
 import {encounterProgress} from './adventure-engine.js';
-import { WIDTH, HEIGHT, titleCase, borderTrees, nextSeed, rng as seededRandom } from './adventure-world.js';
+import { WIDTH, HEIGHT, REGIONS, titleCase, borderTrees, nextSeed, rng as seededRandom } from './adventure-world.js';
 import { COUNTERS, freshGame, worldFor, advanceGame, format, money, xpNeeded, levelBase, maxHealth } from './adventure-engine.js';
 import { SAVE_KEY as LIVE_SAVE_KEY, encode, decode, catchUp } from './adventure-save.js';
-import { REGIONS } from './demo-regions.js';
 import { paintMeadow, paintRoads, paintDesertRiver, terrainPosition } from './demo-terrain.js';
 
 const SAVE_KEY = document.documentElement.hasAttribute('data-test-session') ? 'infinite-adventure-browser-qa' : LIVE_SAVE_KEY;
@@ -80,7 +79,6 @@ function prepareNextRegion(){
 }
 
 async function selectRegion(next) {
-  $('region').disabled = true;
   const previous = regionalFrames;
   try {
     const nextFrames = await loadArt('regions',next);
@@ -89,13 +87,12 @@ async function selectRegion(next) {
     const oldLandscape = landscapes.get('full-map');
     landscapes.set('full-map', landscape); landscapes.set('follow-view', landscape);
     if (oldLandscape) oldLandscape.width = oldLandscape.height = 1;
-    region = next; staticKey = ''; prepareNextRegion(); canvas.dataset.region = next; $('region').value = next; $('region').title = 'Matching terrain and props';
+    region = next; staticKey = ''; prepareNextRegion(); canvas.dataset.region = next;
     draw();
   } catch (error) {
-    regionalFrames = previous; $('region').value = region;
-    $('region').title = `Could not load palette: ${error.message}`;
+    regionalFrames = previous;
     throw error;
-  } finally { $('region').disabled = false; }
+  }
 }
 
 function makeLandscape(style, palette) {
@@ -265,7 +262,6 @@ function setMode(next) {
   if (!['full-map', 'follow-view'].includes(next)) throw new Error('Choose full-map or follow-view.');
   mode = next; camera = null;
   document.querySelectorAll('[data-zoom]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.zoom === (mode === 'full-map' ? 'full' : 'close'))));
-  text('viewLabel', mode === 'full-map' ? 'Full Map · Soft 3D · 24 × 18' : 'Follow · Soft 3D');
   draw(performance.now());
 }
 function setPaused(value) { paused = value; draw(performance.now()); }
@@ -276,20 +272,8 @@ document.querySelectorAll('[data-speed]').forEach(button => button.onclick = () 
   speed = Number(button.dataset.speed);
   document.querySelectorAll('[data-speed]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === speed)));
 });
-$('restart').remove();
-const regionLabel = document.createElement('label'); regionLabel.textContent = 'Region ';
-const regionSelect = document.createElement('select'); regionSelect.id = 'region'; regionSelect.setAttribute('aria-label', 'Terrain palette'); regionSelect.disabled = true;
-for (const name of REGIONS) { const option = document.createElement('option'); option.value = name; option.textContent = titleCase(name); regionSelect.append(option); }
-regionLabel.append(regionSelect); regionLabel.hidden = true; $('zoomControl').before(regionLabel);
-$('zoomControl').remove();
-regionSelect.onchange = () => selectRegion(regionSelect.value).catch(error => { console.error(error); alert('This palette could not load. Please try again.'); });
 
 const music = new Audio(); music.preload='none'; music.loop = true; music.volume = .22;
-// Keep the map itself clear: the view controls belong with the rest of the adventure controls.
-const mapToolbar = document.querySelector('.demo-toolbar');
-if (mapToolbar) {
-  document.querySelector('.header-tools')?.append(mapToolbar);
-}
 $('music').onclick = async () => {
   if(!music.getAttribute('src'))music.src=music.canPlayType('audio/ogg; codecs=opus')?'meadow.ogg':'meadow.mp3';
   if (music.paused) { try { await music.play(); } catch { text('music', '♫ Retry sound'); return; } } else music.pause();

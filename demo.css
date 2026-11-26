@@ -2,19 +2,10 @@
 .world { background: #132b23; }
 #map { image-rendering: auto; }
 .fighter canvas, #creationPreview { image-rendering: auto; }
-.demo-toolbar { position: absolute; bottom: 12px; left: 12px; right: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; pointer-events: none; z-index: 1; }
-.demo-toolbar > span, .demo-toolbar > div { background: #10271feb; border: 1px solid #647550; border-radius: 6px; padding: 6px 10px; font-size: 12px; color: #e5d4a0; }
-.demo-toolbar > div { display: flex; align-items: center; flex-wrap: wrap; max-width: 100%; box-sizing: border-box; gap: 6px; pointer-events: auto; padding: 4px; }
-.demo-toolbar button { padding: 5px 9px; font-size: 12px; }
-#zoomControl { display: flex; align-items: center; gap: 7px; padding: 0 6px; }
-#zoomControl[hidden] { display: none; }
-#followZoom { width: 90px; accent-color: #eec16b; }
 #loading { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; background: #132b23; color: #eec16b; padding: 24px; text-align: center; }
 #loading[hidden] { display: none; }
 .mapview { min-height: 300px; }
-@media (max-width: 600px) { .demo-toolbar { left: 6px; right: 6px; bottom: 6px; } .demo-toolbar > span { font-size: 10px; padding: 5px; } #zoomControl { font-size: 11px; gap: 3px; } #followZoom { width: 60px; } }
 @media (prefers-reduced-motion: reduce) { .bar i, .timer { transition: none; } }
-.demo-toolbar select { background: #172b26; color: #eee9d9; border: 1px solid #546354; border-radius: 5px; padding: 5px; font: inherit; }
 
 /* Tight display crop of the supplied banner; preserve the original pixels. */
 header h1 { position: relative; aspect-ratio: 4.3; overflow: hidden; width: 100%; }
@@ -100,24 +91,6 @@ header::after {
 .header-tools .speeds button { flex: 0 0 auto; border: 1px solid var(--lw-line); border-radius: 10px; box-shadow: none; padding: 9px 12px; }
 .header-tools .speeds button[aria-pressed="true"] { color: var(--lw-ink); background: #fff3bb; border-color: var(--lw-line); }
 .header-tools .music { flex: 0 0 auto; background: #f8fffd; padding: 9px 12px; }
-.header-tools .demo-toolbar {
-  position: static;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  pointer-events: auto;
-}
-.header-tools .demo-toolbar > span { display: none; }
-.header-tools .demo-toolbar > div { background: transparent; color: var(--lw-ink); border: 0; padding: 0; gap: 7px; flex: 0 1 auto; max-width: 100%; }
-.header-tools .demo-toolbar > div > * { flex: 0 0 auto; }
-.header-tools .demo-toolbar button { padding: 9px 11px; }
-.header-tools .demo-toolbar select { color: var(--lw-ink); background: #fff; border-color: var(--lw-line); border-radius: 8px; padding: 7px; }
-.header-tools #zoomControl { padding: 0; }
-.header-tools #zoomControl { display: none; }
-.header-tools #followZoom { accent-color: var(--lw-teal); }
 
 .layout {
   max-width: none;
@@ -136,8 +109,6 @@ header::after {
 .mapview { background: #dbeee4; }
 #map { image-rendering: auto; }
 #loading { background: #eff9f3; color: var(--lw-teal); font-weight: 700; }
-/* The playable area gets no text/control overlay; controls live in the header. */
-.world > .mapview > .demo-toolbar { display: none; }
 
 aside { gap: 10px; }
 .sidebar-scroll { gap: 10px; padding-right: 2px; }
@@ -199,20 +170,19 @@ footer { color: #547586; }
   header > div:first-child { flex: 0 1 280px; min-width: 120px; }
   header .logo { width: 100%; max-width: 280px; }
   .header-tools { flex: 1 0 auto; width: auto; flex-wrap: nowrap; justify-content: flex-end; }
-  .header-tools .demo-toolbar, .header-tools .demo-toolbar > div { flex-wrap: nowrap; flex-shrink: 0; }
   .header-tools .zooms::before { display: none; }
 }
 @media (max-width: 1180px) and (min-width: 900px) {
   header { padding-inline: 12px; gap: 8px; }
   .header-tools #place { max-width: 185px; overflow: hidden; text-overflow: ellipsis; }
-  .header-tools .speeds button, .header-tools .music, .header-tools .demo-toolbar button { font-size: 11px; padding: 8px; }
+  .header-tools .speeds button, .header-tools .music { font-size: 11px; padding: 8px; }
   .layout { grid-template-columns: minmax(0, 1fr) 295px; gap: 12px; padding-inline: 12px; }
 }
 @media (max-width: 1370px) and (min-width: 1181px) {
   .logo { width: 280px; }
   .header-tools { gap: 5px; }
   .header-tools #place { padding: 8px 10px; font-size: 12px; }
-  .header-tools .speeds button, .header-tools .music, .header-tools .demo-toolbar button { font-size: 11px; padding: 8px 9px; }
+  .header-tools .speeds button, .header-tools .music { font-size: 11px; padding: 8px 9px; }
 }
 @media (max-width: 899px) {
   body { background: linear-gradient(135deg, #f7fcf9, #e6f3ed); }
@@ -227,7 +197,7 @@ footer { color: #547586; }
   header::after { display: none; }
   .header-tools { gap: 5px; }
   .header-tools #place { padding: 7px 9px; font-size: 12px; }
-  .header-tools .speeds button, .header-tools .music, .header-tools .demo-toolbar button { padding: 7px 8px; font-size: 11px; }
+  .header-tools .speeds button, .header-tools .music { padding: 7px 8px; font-size: 11px; }
   .world, .panel, aside > .activity, aside > .activity.fighting { border-radius: 12px; }
   .layout { padding-inline: 8px; }
 }

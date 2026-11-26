@@ -1,7 +1,6 @@
 import {generateWorld as generatePreviousWorld} from './adventure-world-v5.js';
 import {generateWorld as generateLegacyWorld} from './adventure-world-v3.js';
 import { generateWorld, approachPath, nextSeed, rng, ENEMIES } from './adventure-world.js';
-import { findPath } from './demo-world.js';
 export const COUNTERS=['xpTotal','gold','earned','spent','potions','potionsFound','wins','defeats','discoveries','circuits','completed','upgrades','lootSold'];
 export const BALANCE={enemyDamage:.068, hazardChance:.045, hazardMultiplier:2.1};
 export function sqrt(n){if(n<2n)return n;let x=1n<<BigInt(Math.ceil(n.toString(2).length/2));while(true){const y=(x+n/x)/2n;if(y>=x)return x;x=y;}}
