@@ -247,6 +247,8 @@ function updateUI() {
   const eKey = state.event.title + state.event.text + heroName;
   if (eKey !== eventKey) {
     eventKey = eKey;
+    // Screen readers hear notable events only, not every step along the road.
+    if (state.event.title !== 'Along the road') text('announcer', `${state.event.title}. ${nameText(state.event.text)}`);
     $('eventTitle').className = state.event.quality ? `quality-${state.event.quality.toLowerCase()}` : '';
     text('eventTitle', state.event.title); text('eventText', nameText(state.event.text));
     $('history').replaceChildren();
@@ -287,7 +289,7 @@ $('confirmDelete').onclick = () => {
 };
 function needsCreation(loaded) { return !loaded || (!loaded.state.characterCreated && loaded.state.name.trim().toLowerCase() === 'rowan'); }
 function openCreator() {
-  creating=true; pendingSummary=null; $('recap').hidden=true; text('creationStatus',ready?'':'Loading the adventure artwork…');
+  creating=true; pendingSummary=null; closeRecap(); text('creationStatus',ready?'':'Loading the adventure artwork…');
   $('creator').hidden=false; document.body.classList.add('creating'); $('characterForm').reset();
   $('creationPreview').getContext('2d').clearRect(0,0,144,144); previewHero();
 }
@@ -306,7 +308,21 @@ $('characterForm').onsubmit = event => {
   heroColour=$('chosenColour').value;
   hero = choice; heroName = $('chosenName').value.trim(); creating = false; $('creator').hidden = true; document.body.classList.remove('creating'); setPaused(false); restart();
 };
-$('dismiss').onclick = () => { $('recap').hidden = true; };
+// The recap is a modal: focus moves into it, Esc closes it, and focus returns afterwards.
+let recapReturnFocus = null;
+function openRecap() {
+  if (!$('recap').hidden) return;
+  recapReturnFocus = document.activeElement; $('recap').hidden = false; $('dismiss').focus();
+}
+function closeRecap() {
+  if ($('recap').hidden) return;
+  $('recap').hidden = true; if (recapReturnFocus?.isConnected) recapReturnFocus.focus(); recapReturnFocus = null;
+}
+$('dismiss').onclick = closeRecap;
+$('recap').addEventListener('keydown', event => {
+  if (event.key === 'Escape') { event.preventDefault(); closeRecap(); }
+  else if (event.key === 'Tab') { event.preventDefault(); $('dismiss').focus(); }
+});
 new ResizeObserver(() => draw(performance.now())).observe(canvas);
 document.addEventListener('visibilitychange', () => {
   lastTime = 0; if (!owner || creating || saveBlocked || loadingRegion || artworkFailed) return;
@@ -411,7 +427,7 @@ function showSummary(summary) {
   for (const [label, value] of [['Levels Gained',format(d.level)],['Quests Completed',format(d.completed)],['Time Away',awayTime(summary.elapsedMs)],['Maps Completed',format(d.circuits)],['Battles Won',format(d.wins)],['Discoveries',format(d.discoveries)],['Gold Earned',money(d.earned)],['Healing Potions Found',format(d.potionsFound)]]) {
     const box = document.createElement('div'), strong = document.createElement('strong'); strong.textContent = value; box.append(strong, document.createTextNode(label)); $('reportStats').append(box);
   }
-  $('reportLevels').hidden = true; $('reportDream').hidden = true; text('reportTimer', ''); $('recap').hidden = false;
+  $('reportLevels').hidden = true; $('reportDream').hidden = true; text('reportTimer', ''); openRecap();
 }
 $('closeCard').onclick = () => { state.card = null; $('eventCard').hidden = true; };
 async function boot() {
