@@ -2,7 +2,7 @@ import {loadArt,prefetchRegion} from './game-assets.js';
 import {readSave} from './adventure-storage.js';
 import {encounterProgress} from './adventure-engine.js';
 import { WIDTH, HEIGHT, titleCase, borderTrees, nextSeed, rng as seededRandom } from './adventure-world.js';
-import { freshGame, worldFor, advanceGame, format, money, xpNeeded, levelBase, maxHealth } from './adventure-engine.js';
+import { COUNTERS, freshGame, worldFor, advanceGame, format, money, xpNeeded, levelBase, maxHealth } from './adventure-engine.js';
 import { SAVE_KEY as LIVE_SAVE_KEY, encode, decode, catchUp } from './adventure-save.js';
 import { REGIONS } from './demo-regions.js';
 import { paintMeadow, paintRoads, paintDesertRiver, terrainPosition } from './demo-terrain.js';
@@ -89,7 +89,7 @@ async function selectRegion(next) {
     const oldLandscape = landscapes.get('full-map');
     landscapes.set('full-map', landscape); landscapes.set('follow-view', landscape);
     if (oldLandscape) oldLandscape.width = oldLandscape.height = 1;
-    region = next; prepareNextRegion(); canvas.dataset.region = next; $('region').value = next; $('region').title = 'Matching terrain and props';
+    region = next; staticKey = ''; prepareNextRegion(); canvas.dataset.region = next; $('region').value = next; $('region').title = 'Matching terrain and props';
     draw();
   } catch (error) {
     regionalFrames = previous; $('region').value = region;
@@ -125,45 +125,74 @@ function makeLandscape(style, palette) {
   return ground;
 }
 
-function draw(now = 0) {
-  if (!ready || creating || loadingRegion || artworkFailed) return;
-  const p = terrainPosition(state, world);
-  context.imageSmoothingEnabled = true;
-  context.clearRect(0, 0, worldWidth, worldHeight);
-  context.drawImage(landscapes.get(mode), 0, 0);
-  // Foot-point depth ordering lets the hero pass behind tall scenery.
-  const drawables = [];
-  for (const tree of [...world.trees,...(comparisonBorder?borderTrees(world.seed,world.riverX):[])]) drawables.push({ z: tree.y + .95, draw: () => {
-    sprite(context, mode, 'terrain-tiles', tree.kind, (tree.x + 1 - tree.size) * TILE, (tree.y + 1 - tree.size) * TILE, tree.size * TILE);
-  } });
-  for (const b of world.buildings) drawables.push({ z: b.y + b.h - .1, draw: () => {
-    sprite(context, mode, 'building-sprites', b.kind, b.x * TILE, b.y * TILE, b.w * TILE, b.h * TILE);
-  } });
-  for (const object of world.objects) drawables.push({ z: object.y + (object.size ? .94 : .54), draw: () => {
+const staticScene = document.createElement('canvas');
+staticScene.width = worldWidth; staticScene.height = worldHeight;
+let staticKey = '', staticItems = [], heroBox = null;
+// Every scenery item with its depth and the canvas rectangle it can paint.
+function sceneItems() {
+  const items = [];
+  for (const tree of [...world.trees,...(comparisonBorder?borderTrees(world.seed,world.riverX):[])]) {
+    const x = (tree.x + 1 - tree.size) * TILE, y = (tree.y + 1 - tree.size) * TILE, s = tree.size * TILE;
+    items.push({ z: tree.y + .95, box: [x, y, s, s], draw: ctx => sprite(ctx, mode, 'terrain-tiles', tree.kind, x, y, s) });
+  }
+  for (const b of world.buildings) {
+    const box = [b.x * TILE, b.y * TILE, b.w * TILE, b.h * TILE];
+    items.push({ z: b.y + b.h - .1, box, draw: ctx => sprite(ctx, mode, 'building-sprites', b.kind, ...box) });
+  }
+  for (const object of world.objects) {
     const enemy = object.group === 'enemy-sprites';
     const scale = object.size || (['flower', 'bush'].includes(object.kind) ? .45 : enemy || ['shrine', 'well', 'npc', 'exit'].includes(object.kind) ? 1 : .84);
     const faded = state.visited.has(object.id) ? .46 : 1;
-    sprite(context, mode, object.group, object.kind, (object.size ? object.x + 1 - scale : object.x + .5 - scale / 2) * TILE, (object.y + (object.size ? 1 : .6) - scale) * TILE, TILE * scale, TILE * scale, faded);
-  } });
-  for (const object of world.objects.filter(o => o.type === 'quest' || o.type === 'discovery')) {
-    context.fillStyle = object.type === 'quest' ? '#d6ae48' : '#add6e9';
-    context.globalAlpha = state.visited.has(object.id) ? .3 : 1;
-    context.beginPath(); context.arc((object.x + .5) * TILE, (object.y + .54) * TILE, 7, 0, Math.PI * 2); context.fill(); context.globalAlpha = 1;
+    const x = (object.size ? object.x + 1 - scale : object.x + .5 - scale / 2) * TILE, y = (object.y + (object.size ? 1 : .6) - scale) * TILE, s = TILE * scale;
+    items.push({ z: object.y + (object.size ? .94 : .54), box: [x, y, s, s], draw: ctx => sprite(ctx, mode, object.group, object.kind, x, y, s, s, faded) });
   }
-  drawables.push({ z: p.y + .54, draw: () => {
-    sprite(context, mode, 'hero-sprites', hero, p.x * TILE, (p.y - .4) * TILE, TILE);
-  } });
-  drawables.sort((a, b) => a.z - b.z).forEach(item => item.draw());
+  // Quest and discovery markers sit on the ground, beneath every sprite.
+  for (const object of world.objects.filter(o => o.type === 'quest' || o.type === 'discovery')) {
+    const cx = (object.x + .5) * TILE, cy = (object.y + .54) * TILE, alpha = state.visited.has(object.id) ? .3 : 1;
+    items.push({ z: -Infinity, box: [cx - 8, cy - 8, 16, 16], draw: ctx => {
+      ctx.fillStyle = object.type === 'quest' ? '#d6ae48' : '#add6e9'; ctx.globalAlpha = alpha;
+      ctx.beginPath(); ctx.arc(cx, cy, 7, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    } });
+  }
+  return items;
+}
+
+function draw(now = 0) {
+  if (!ready || creating || loadingRegion || artworkFailed) return;
+  const p = terrainPosition(state, world);
+  // Scenery only changes when the map, palette or visited set changes, so it is
+  // painted once into staticScene. Each frame repaints just the hero's box.
+  const key = `${world.seed}:${state.mapNumber}:${region}:${state.visited.size}:${comparisonBorder}`;
+  if (key !== staticKey) {
+    staticItems = sceneItems().sort((a, b) => a.z - b.z);
+    const ctx = staticScene.getContext('2d'); ctx.imageSmoothingEnabled = true;
+    ctx.clearRect(0, 0, worldWidth, worldHeight); ctx.drawImage(landscapes.get(mode), 0, 0);
+    for (const item of staticItems) item.draw(ctx);
+    context.clearRect(0, 0, worldWidth, worldHeight); context.drawImage(staticScene, 0, 0);
+    staticKey = key; heroBox = null;
+  } else if (heroBox) context.drawImage(staticScene, ...heroBox, ...heroBox);
+  // Foot-point depth ordering lets the hero pass behind tall scenery.
+  const x0 = Math.max(0, Math.floor(p.x * TILE - 2)), y0 = Math.max(0, Math.floor((p.y - .4) * TILE - 2));
+  const heroRect = [x0, y0, Math.min(worldWidth, Math.ceil(p.x * TILE + TILE + 2)) - x0, Math.min(worldHeight, Math.ceil((p.y + .6) * TILE + 2)) - y0];
+  const heroItem = { z: p.y + .54, draw: ctx => sprite(ctx, mode, 'hero-sprites', hero, p.x * TILE, (p.y - .4) * TILE, TILE) };
+  const overlaps = item => item.box[0] < heroRect[0] + heroRect[2] && item.box[0] + item.box[2] > heroRect[0] && item.box[1] < heroRect[1] + heroRect[3] && item.box[1] + item.box[3] > heroRect[1];
+  const local = staticItems.filter(overlaps); local.splice(local.findIndex(item => item.z > heroItem.z) >>> 0, 0, heroItem);
+  context.save(); context.imageSmoothingEnabled = true;
+  context.beginPath(); context.rect(...heroRect); context.clip();
+  context.drawImage(landscapes.get(mode), ...heroRect, ...heroRect);
+  for (const item of local) item.draw(context);
+  context.restore(); heroBox = heroRect;
 
   const box = canvas.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 2);
   const width = Math.max(1, Math.round(box.width * dpr)), height = Math.max(1, Math.round(box.height * dpr));
   if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; camera = null; }
   view.fillStyle = '#132b23'; view.fillRect(0, 0, width, height);
   view.imageSmoothingEnabled = true;
-  const scale = Math.min(width / worldWidth, (height - 52 * dpr) / worldHeight);
+  // The map toolbar lives in the header now, so the whole canvas is available.
+  const scale = Math.min(width / worldWidth, height / worldHeight);
   if (mode === 'full-map') {
     const w = worldWidth * scale, h = worldHeight * scale;
-    view.drawImage(scene, 0, 0, worldWidth, worldHeight, Math.round((width - w) / 2), Math.round((height - 44 * dpr - h) / 2), w, h);
+    view.drawImage(scene, 0, 0, worldWidth, worldHeight, Math.round((width - w) / 2), Math.round((height - h) / 2), w, h);
   } else {
     const followScale = Math.max(scale, 74 * dpr / TILE / 2.2) * zoom;
     const sw = Math.min(worldWidth, width / followScale), sh = Math.min(worldHeight, height / followScale);
@@ -262,14 +291,14 @@ if (mapToolbar) {
   document.querySelector('.header-tools')?.append(mapToolbar);
 }
 $('music').onclick = async () => {
-  if(!music.getAttribute('src'))music.src='meadow.wav';
+  if(!music.getAttribute('src'))music.src=music.canPlayType('audio/ogg; codecs=opus')?'meadow.ogg':'meadow.mp3';
   if (music.paused) { try { await music.play(); } catch { text('music', '♫ Retry sound'); return; } } else music.pause();
   text('music', music.paused ? '♫ Sound off' : '♫ Sound on'); $('music').setAttribute('aria-pressed', String(!music.paused));
 };
 $('deleteCharacter').onclick = () => { $('deleteWarning').hidden = false; $('deleteActions').hidden = false; $('cancelDelete').focus(); };
 $('cancelDelete').onclick = () => { $('deleteWarning').hidden = true; $('deleteActions').hidden = true; $('deleteCharacter').focus(); };
 $('confirmDelete').onclick = () => {
-  if (!owner) return; try { localStorage.removeItem(SAVE_KEY); if(SAVE_KEY===LIVE_SAVE_KEY)localStorage.removeItem('infinite-adventure-v1'); } catch { text('deleteError','The browser could not remove this save.'); return; } creating = true; $('deleteWarning').hidden = true; $('deleteActions').hidden = true;
+  if (!owner) { text('deleteError','This adventure is running in another tab. Close that tab, then delete it here.'); return; } text('deleteError',''); try { localStorage.removeItem(SAVE_KEY); if(SAVE_KEY===LIVE_SAVE_KEY)localStorage.removeItem('infinite-adventure-v1'); } catch { text('deleteError','The browser could not remove this save.'); return; } creating = true; $('deleteWarning').hidden = true; $('deleteActions').hidden = true;
   openCreator();
 };
 function needsCreation(loaded) { return !loaded || (!loaded.state.characterCreated && loaded.state.name.trim().toLowerCase() === 'rowan'); }
@@ -298,7 +327,7 @@ new ResizeObserver(() => draw(performance.now())).observe(canvas);
 document.addEventListener('visibilitychange', () => {
   lastTime = 0; if (!owner || creating || saveBlocked || loadingRegion || artworkFailed) return;
   if (document.hidden) persist();
-  else { const oldSeed=world.seed; pendingSummary = catchUp(state, Math.max(0, Date.now() - savedAt)); world = worldFor(state); persist(); if(world.seed!==oldSeed) refreshMap(); showSummary(pendingSummary); }
+  else { const oldSeed=world.seed; pendingSummary = awayFor(Math.max(0, Date.now() - savedAt)); world = worldFor(state); persist(); if(world.seed!==oldSeed) refreshMap(); showSummary(pendingSummary); }
 });
 window.addEventListener('pagehide', () => { if (!document.hidden) persist(); });
 setInterval(() => { if (!document.hidden && ready && !creating) persist(); }, 5000);
@@ -310,7 +339,7 @@ function loop(now) {
   frameTime=now;
   const dt = lastTime ? Math.max(0, (now - lastTime) / 1000) : 0; lastTime = now;
   if (ready && !creating && !document.hidden) {
-    if (!paused && owner && !loadingRegion) { if (dt > 5) { const oldSeed=world.seed; pendingSummary = catchUp(state, dt * 1000); world = worldFor(state); if(world.seed!==oldSeed) refreshMap(); showSummary(pendingSummary); persist(); } else if (advanceGame(state, world, dt * speed, dt)) { world = worldFor(state); refreshMap(); persist(); } }
+    if (!paused && owner && !loadingRegion) { if (dt > 5) { const oldSeed=world.seed; pendingSummary = awayFor(dt * 1000); world = worldFor(state); if(world.seed!==oldSeed) refreshMap(); showSummary(pendingSummary); persist(); } else if (advanceGame(state, world, dt * speed, dt)) { world = worldFor(state); refreshMap(); persist(); } }
     if (!paused) draw(now);
     if (!loadingRegion && now - uiTime > 160) { updateUI(); uiTime = now; }
   }
@@ -335,6 +364,18 @@ function registerAgentControl() {
       },
     }, { signal: lifecycle.signal })).catch(error => console.warn('Optional demo controls unavailable:', error));
   } catch (error) { console.warn('Optional demo controls unavailable:', error); }
+}
+
+// Short absences replay the real simulation, so no stop, fight or map is skipped.
+// The statistical catch-up in adventure-save.js handles long absences.
+const REPLAY_LIMIT_MS = 5 * 60 * 1000;
+function awayFor(ms) {
+  if (!(ms > 0)) return null;
+  if (ms > REPLAY_LIMIT_MS) return catchUp(state, ms);
+  const before = Object.fromEntries([...COUNTERS, 'level'].map(k => [k, state[k]]));
+  let w = worldFor(state), left = ms / 1000;
+  while (left > 1e-9) { const step = Math.min(.25, left); left -= step; if (advanceGame(state, w, step, step)) w = worldFor(state); }
+  return { elapsedMs: ms, deltas: Object.fromEntries([...COUNTERS, 'level'].map(k => [k, state[k] - before[k]])) };
 }
 
 function persist() {
@@ -394,7 +435,7 @@ async function boot() {
   if (needsCreation(loaded)) { loaded=null; openCreator(); }
   if (loaded) { state = loaded.state; savedAt = loaded.savedAt; }
   world = worldFor(state); heroName = state.name; hero = state.hero; heroColour=state.heroColour || 'original';
-  if (loaded && owner) { pendingSummary = catchUp(state, Math.max(0, Date.now() - savedAt)); world=worldFor(state); }
+  if (loaded && owner) { pendingSummary = awayFor(Math.max(0, Date.now() - savedAt)); world=worldFor(state); }
   await loadAssets();
   lastTime=0;
   ready = true; text('creationStatus',''); previewHero(); $('loading').hidden = true; updateGuide(); setMode(mode); updateUI(); draw(); registerAgentControl(); if (owner) persist(); showSummary(pendingSummary); requestAnimationFrame(loop);
@@ -409,7 +450,7 @@ if (navigator.locks) navigator.locks.request(SAVE_KEY, {ifAvailable:true}, async
     if (closed) return;
     owner = true; let loaded;
     try { loaded=loadSavedAdventure(); } catch(error) { failureNotice(error.message,()=>location.reload()); await holdLock(); return; }
-    if (loaded && !needsCreation(loaded)) { closeCreator(); state = loaded.state; pendingSummary = catchUp(state, Math.max(0,Date.now()-loaded.savedAt)); world = worldFor(state); heroName=state.name;hero=state.hero;heroColour=state.heroColour || 'original'; }
+    if (loaded && !needsCreation(loaded)) { closeCreator(); state = loaded.state; pendingSummary = awayFor(Math.max(0,Date.now()-loaded.savedAt)); world = worldFor(state); heroName=state.name;hero=state.hero;heroColour=state.heroColour || 'original'; }
     else openCreator();
     previewHero();
     lastTime=0; persist(); await refreshMap(); updateGuide(); updateUI(); showSummary(pendingSummary); await holdLock();

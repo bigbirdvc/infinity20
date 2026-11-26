@@ -57,7 +57,7 @@ export function catchUp(s,elapsedMs){if(!Number.isFinite(elapsedMs)||elapsedMs<=
  if(maps>0n){s.completed+=BigInt(original.quests.length-s.completedQuests.size)+(maps-1n)*2n;s.circuits+=maps;s.mapNumber+=maps;s.previousRegion=original.region;s.recentNames=[original.name,...s.recentNames].slice(0,10);s.seed=nextSeed((s.seed+Number(maps%4294967296n))>>>0);s.mapBoss=s.mapNumber%5n===0n||s.mapNumber%5n===2n;s.bossIn=2+s.seed%2;startMap(s);}
  const w=worldFor(s);const stop=Math.min(w.stops.length-1,maps>0n?Math.floor(remainder/140*w.stops.length):oldStop+Math.floor(Number(ms)/Number(firstRemaining)*(w.stops.length-oldStop)));
  const from=maps>0n?0:oldStop;for(let i=from;i<stop;i++){const o=w.stops[i];if(o.type==='quest'&&!s.completedQuests.has(o.quest)){s.completedQuests.add(o.quest);s.completed++;}s.visited.add(o.id);if(['quest','rest','shrine'].includes(o.type))s.checkpoint={...o.approach};}
- if(stop>from||maps>0n){s.stop=stop;const p=stop?w.stops[stop-1].approach:w.entrance;s.x=p.x;s.y=p.y;s.fraction=0;s.route=[];s.target=null;s.enemy=null;s.stage='plan';}s.mapElapsed=maps>0n?remainder/140*w.duration:remainder;s.recovery=0;if(ms>=60000n)s.hp=.7;
+ if(stop>from||maps>0n){s.stop=stop;const p=stop?w.stops[stop-1].approach:w.entrance;s.x=p.x;s.y=p.y;s.fraction=0;s.route=[];s.target=null;s.enemy=null;s.stage='plan';}s.mapElapsed=maps>0n?remainder/140*w.duration:remainder;s.recovery=0;if(ms>=60000n)s.hp=Math.max(s.hp,.7);
  const gains={};for(const [key,rate]of Object.entries(OFFLINE_RATES))gains[key]=expectation(s,key,ms,rate);
  const generatedLoot=gains.lootSold;gains.earned*=10n;
  gains.lootSold=gains.lootSold>BigInt(missingGear)?gains.lootSold-BigInt(missingGear):0n;
