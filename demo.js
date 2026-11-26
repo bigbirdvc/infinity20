@@ -4,7 +4,10 @@ import {encounterProgress} from './adventure-engine.js';
 import { WIDTH, HEIGHT, REGIONS, titleCase, borderTrees, nextSeed, rng as seededRandom } from './adventure-world.js';
 import { COUNTERS, freshGame, worldFor, advanceGame, format, money, xpNeeded, levelBase, maxHealth } from './adventure-engine.js';
 import { SAVE_KEY as LIVE_SAVE_KEY, encode, decode, catchUp } from './adventure-save.js';
-import { paintMeadow, paintRoads, paintDesertRiver, terrainPosition } from './demo-terrain.js';
+import { paintMeadow, paintRoads, paintDesertRiver, terrainPosition as classicPosition } from './demo-terrain.js';
+import { paintWorld, walkPosition } from './world-paint.js';
+import { createAmbient } from './ambient.js';
+const terrainPosition = (s, w) => w.generation >= 8 ? walkPosition(s, w) : classicPosition(s, w);
 
 const SAVE_KEY = document.documentElement.hasAttribute('data-test-session') ? 'infinite-adventure-browser-qa' : LIVE_SAVE_KEY;
 const $ = id => document.getElementById(id);
@@ -98,6 +101,7 @@ async function selectRegion(next) {
 function makeLandscape(style, palette) {
   const ground = document.createElement('canvas'); ground.width = worldWidth; ground.height = worldHeight;
   const ctx = ground.getContext('2d'); ctx.imageSmoothingEnabled = true;
+  if (world.generation >= 8) { paintWorld(ctx, { get: key => frameFor(style, ...key.split('/')) }, world, worldWidth, worldHeight, TILE, palette); return ground; }
   paintMeadow(ctx, regionalFrames, worldWidth, worldHeight, TILE, palette);
   paintRoads(ctx, world, regionalFrames, worldWidth, worldHeight, TILE, palette);
   if (palette === 'desert') paintDesertRiver(ctx, regionalFrames, TILE, worldHeight, world.riverX);
@@ -125,33 +129,94 @@ function makeLandscape(style, palette) {
 const staticScene = document.createElement('canvas');
 staticScene.width = worldWidth; staticScene.height = worldHeight;
 let staticKey = '', staticItems = [], heroBox = null;
-// Every scenery item with its depth and the canvas rectangle it can paint.
+// One size for everything: target height and maximum width, in tiles, of each
+// sprite's visible artwork. The art was drawn at many scales; this evens it out.
+const SIZES = {
+  hero: [.98, 1.05], npc: [.9, .8],
+  slime: [.58, .8], bat: [.62, 1], spider: [.6, .95], wolf: [.78, .92], goblin: [.84, .9], skeleton: [.9, .95], bandit: [.88, .9],
+  warlock: [.9, .9], wraith: [.84, .9], 'fallen-knight': [.98, 1], orc: [1, 1], golem: [1.1, 1.1], troll: [1.18, 1.15], ogre: [1.2, 1.2], treant: [1.3, 1.2], drake: [1.08, 1.15],
+  chest: [.46, .6], flower: [.36, .4], mushroom: [.4, .42], shrine: [.86, .75], well: [1.02, .98], campfire: [.46, .6], sign: [.62, .6], grave: [.56, .5],
+  bench: [.42, .74], exit: [1.8, 1.9], log: [.3, .78], pebble: [.2, .42], bush: [.44, .66], crystal: [.58, .52], 'east-sign': [.62, .6], 'south-bench': [.42, .74],
+  'tree-small': [1.12, 1.02], 'rock-small': [.52, .84], 'tree-large': [2.15, 2.05], 'tree-conifer-large': [2.35, 1.6], 'tree-crooked-large': [2.05, 2.1],
+  'rock-large': [1.1, 1.85], 'rock-layered-large': [1.22, 1.95],
+  house: [1.95, 2.02], inn: [2.2, 2.08], 'house-small': [1.3, 1.12], 'inn-small': [1.42, 1.15], tower: [2.55, 1.65], 'tower-small': [1.85, 1.08], ruins: [1.85, 2.08], 'ruins-small': [1.25, 1.22],
+};
+const boxes = new WeakMap();
+// The visible artwork inside a padded sprite canvas, found once per frame.
+function artBox(f) {
+  let cached = boxes.get(f); if (cached) return cached;
+  const data = f.image.getContext('2d').getImageData(f.x, f.y, f.w, f.h).data;
+  let x0 = f.w, y0 = f.h, x1 = -1, y1 = -1;
+  for (let y = 0; y < f.h; y++) for (let x = 0; x < f.w; x++) if (data[(y * f.w + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  cached = x1 < 0 ? { x: 0, y: 0, w: f.w, h: f.h } : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  boxes.set(f, cached); return cached;
+}
+// Place a sprite by its feet: centred on footX, standing on footY.
+function placed(group, name, footX, footY, size, boost = 1) {
+  const f = frameFor(mode, group, name), b = artBox(f), [h, w] = size || SIZES[name] || [.9, .9];
+  const scale = Math.min(h * TILE * boost / b.h, w * TILE * boost / b.w), dw = b.w * scale, dh = b.h * scale;
+  return { f, b, rect: [footX - dw / 2, footY - dh, dw, dh] };
+}
+function groundShadow(ctx, x, y, width, alpha = .3) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(1, .32);
+  const r = width / 2, g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+  g.addColorStop(0, `rgba(16,24,12,${alpha})`); g.addColorStop(.6, `rgba(16,24,12,${alpha * .55})`); g.addColorStop(1, 'rgba(16,24,12,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+}
+function standing(group, name, footX, footY, { size, boost = 1, alpha = 1, shadow = .3, shadowWidth = .78 } = {}) {
+  const p = placed(group, name, footX, footY, size, boost), [x, y, w, h] = p.rect;
+  const sw = Math.max(w * shadowWidth, TILE * .22);
+  const box = [Math.min(x, footX - sw / 2) - 2, y - 2, Math.max(w, sw) + 4, h + sw * .2 + 4];
+  return { z: footY / TILE, box, draw: ctx => {
+    if (shadow) groundShadow(ctx, footX, footY - h * .02, sw, shadow * (alpha < 1 ? .6 : 1));
+    ctx.globalAlpha = alpha; ctx.drawImage(p.f.image, p.f.x + p.b.x, p.f.y + p.b.y, p.b.w, p.b.h, x, y, w, h); ctx.globalAlpha = 1;
+  } };
+}
 function sceneItems() {
   const items = [];
-  for (const tree of [...world.trees,...(comparisonBorder?borderTrees(world.seed,world.riverX):[])]) {
-    const x = (tree.x + 1 - tree.size) * TILE, y = (tree.y + 1 - tree.size) * TILE, s = tree.size * TILE;
-    items.push({ z: tree.y + .95, box: [x, y, s, s], draw: ctx => sprite(ctx, mode, 'terrain-tiles', tree.kind, x, y, s) });
+  const border = world.generation >= 8 ? world.border : (comparisonBorder ? borderTrees(world.seed, world.riverX) : []);
+  for (const tree of [...world.trees, ...border]) {
+    const big = tree.size === 2, fx = (big ? tree.x : tree.x + .5 + (tree.jx || 0)) * TILE, fy = (tree.y + (big ? .94 : .86) + (tree.jy || 0)) * TILE;
+    items.push(standing('terrain-tiles', tree.kind, fx, fy, { boost: tree.scale || 1, shadow: tree.kind.startsWith('rock') ? .26 : .34, shadowWidth: tree.kind.startsWith('rock') ? .9 : .7 }));
   }
-  for (const b of world.buildings) {
-    const box = [b.x * TILE, b.y * TILE, b.w * TILE, b.h * TILE];
-    items.push({ z: b.y + b.h - .1, box, draw: ctx => sprite(ctx, mode, 'building-sprites', b.kind, ...box) });
-  }
+  for (const b of world.buildings) items.push(standing('building-sprites', b.kind, (b.x + b.w / 2) * TILE, (b.y + b.h - .02) * TILE, { shadow: .32, shadowWidth: .92 }));
   for (const object of world.objects) {
-    const enemy = object.group === 'enemy-sprites';
-    const scale = object.size || (['flower', 'bush'].includes(object.kind) ? .45 : enemy || ['shrine', 'well', 'npc', 'exit'].includes(object.kind) ? 1 : .84);
-    const faded = state.visited.has(object.id) ? .46 : 1;
-    const x = (object.size ? object.x + 1 - scale : object.x + .5 - scale / 2) * TILE, y = (object.y + (object.size ? 1 : .6) - scale) * TILE, s = TILE * scale;
-    items.push({ z: object.y + (object.size ? .94 : .54), box: [x, y, s, s], draw: ctx => sprite(ctx, mode, object.group, object.kind, x, y, s, s, faded) });
+    const enemy = object.group === 'enemy-sprites', faded = state.visited.has(object.id) ? .46 : 1;
+    const arch = object.kind === 'exit';
+    const fx = (arch && object.size ? object.x : object.x + .5 + (object.jx || 0)) * TILE;
+    const fy = (object.y + (arch ? (object.size ? .95 : .9) : .72)) * TILE;
+    items.push(standing(object.group, object.kind, fx, fy, { alpha: faded, boost: object.boss ? 1.32 : 1, shadow: ['flower', 'pebble', 'grave'].includes(object.kind) ? .18 : enemy ? .34 : .28 }));
   }
   // Quest and discovery markers sit on the ground, beneath every sprite.
   for (const object of world.objects.filter(o => o.type === 'quest' || o.type === 'discovery')) {
-    const cx = (object.x + .5) * TILE, cy = (object.y + .54) * TILE, alpha = state.visited.has(object.id) ? .3 : 1;
-    items.push({ z: -Infinity, box: [cx - 8, cy - 8, 16, 16], draw: ctx => {
-      ctx.fillStyle = object.type === 'quest' ? '#d6ae48' : '#add6e9'; ctx.globalAlpha = alpha;
-      ctx.beginPath(); ctx.arc(cx, cy, 7, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    const cx = (object.x + .5) * TILE, cy = (object.y + .78) * TILE, alpha = state.visited.has(object.id) ? .3 : 1;
+    items.push({ z: -Infinity, box: [cx - 14, cy - 8, 28, 16], draw: ctx => {
+      ctx.globalAlpha = alpha; ctx.strokeStyle = object.type === 'quest' ? '#e8bd4a' : '#9fd3ec'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(cx, cy, 12, 5.5, 0, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
     } });
   }
   return items;
+}
+let ambient = null, ambientKey = '';
+function heroItem(p) {
+  const footX = (p.x + .5) * TILE, footY = (p.y + .72) * TILE;
+  const body = standing('hero-sprites', hero, footX, footY, { shadow: .36 });
+  const rect = [footX - TILE * .95, footY - TILE * 1.55, TILE * 1.9, TILE * 1.82];
+  return { z: footY / TILE, rect, draw: ctx => {
+    // A soft warm halo keeps the hero easy to find among the scenery.
+    ctx.save(); ctx.translate(footX, footY); ctx.scale(1, .36);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, TILE * .62);
+    g.addColorStop(0, 'rgba(255,236,170,.5)'); g.addColorStop(.6, 'rgba(255,226,140,.2)'); g.addColorStop(1, 'rgba(255,226,140,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, TILE * .62, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    body.draw(ctx);
+    if (mode === 'full-map') {
+      const label = heroName.length > 14 ? heroName.slice(0, 13) + '…' : heroName;
+      ctx.font = `700 ${TILE * .24}px ui-rounded, "Avenir Next", system-ui, sans-serif`;
+      const w = Math.min(TILE * 1.8, ctx.measureText(label).width + TILE * .22), h = TILE * .34, x = footX - w / 2, y = footY - TILE * 1.48;
+      ctx.fillStyle = 'rgba(46,32,18,.82)'; ctx.beginPath(); ctx.roundRect(x, y, w, h, h / 2); ctx.fill();
+      ctx.fillStyle = '#fff3cf'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, footX, y + h / 2 + 1, w - TILE * .12);
+    }
+  } };
 }
 
 function draw(now = 0) {
@@ -169,11 +234,10 @@ function draw(now = 0) {
     staticKey = key; heroBox = null;
   } else if (heroBox) context.drawImage(staticScene, ...heroBox, ...heroBox);
   // Foot-point depth ordering lets the hero pass behind tall scenery.
-  const x0 = Math.max(0, Math.floor(p.x * TILE - 2)), y0 = Math.max(0, Math.floor((p.y - .4) * TILE - 2));
-  const heroRect = [x0, y0, Math.min(worldWidth, Math.ceil(p.x * TILE + TILE + 2)) - x0, Math.min(worldHeight, Math.ceil((p.y + .6) * TILE + 2)) - y0];
-  const heroItem = { z: p.y + .54, draw: ctx => sprite(ctx, mode, 'hero-sprites', hero, p.x * TILE, (p.y - .4) * TILE, TILE) };
+  const hi = heroItem(p), hx = Math.max(0, Math.round(hi.rect[0])), hy = Math.max(0, Math.round(hi.rect[1]));
+  const heroRect = [hx, hy, Math.min(worldWidth, Math.round(hi.rect[0] + hi.rect[2])) - hx, Math.min(worldHeight, Math.round(hi.rect[1] + hi.rect[3])) - hy];
   const overlaps = item => item.box[0] < heroRect[0] + heroRect[2] && item.box[0] + item.box[2] > heroRect[0] && item.box[1] < heroRect[1] + heroRect[3] && item.box[1] + item.box[3] > heroRect[1];
-  const local = staticItems.filter(overlaps); local.splice(local.findIndex(item => item.z > heroItem.z) >>> 0, 0, heroItem);
+  const local = staticItems.filter(overlaps); local.splice(local.findIndex(item => item.z > hi.z) >>> 0, 0, hi);
   context.save(); context.imageSmoothingEnabled = true;
   context.beginPath(); context.rect(...heroRect); context.clip();
   context.drawImage(landscapes.get(mode), ...heroRect, ...heroRect);
@@ -190,6 +254,7 @@ function draw(now = 0) {
   if (mode === 'full-map') {
     const w = worldWidth * scale, h = worldHeight * scale;
     view.drawImage(scene, 0, 0, worldWidth, worldHeight, Math.round((width - w) / 2), Math.round((height - h) / 2), w, h);
+    drawAmbient({ ox: Math.round((width - w) / 2), oy: Math.round((height - h) / 2), s: scale }, now);
   } else {
     const followScale = Math.max(scale, 74 * dpr / TILE / 2.2) * zoom;
     const sw = Math.min(worldWidth, width / followScale), sh = Math.min(worldHeight, height / followScale);
@@ -200,7 +265,16 @@ function draw(now = 0) {
     camera.x = Math.max(0, Math.min(worldWidth - sw, camera.x)); camera.y = Math.max(0, Math.min(worldHeight - sh, camera.y));
     const dw = sw * followScale, dh = sh * followScale;
     view.drawImage(scene, camera.x, camera.y, sw, sh, (width - dw) / 2, (height - dh) / 2, dw, dh);
+    view.save(); view.beginPath(); view.rect((width - dw) / 2, (height - dh) / 2, dw, dh); view.clip();
+    drawAmbient({ ox: (width - dw) / 2 - camera.x * followScale, oy: (height - dh) / 2 - camera.y * followScale, s: followScale }, now);
+    view.restore();
   }
+}
+
+function drawAmbient(tf, now) {
+  const key = `${world.seed}:${state.mapNumber}:${region}`;
+  if (key !== ambientKey) { ambient = createAmbient(world, region, TILE); ambientKey = key; }
+  try { ambient.draw(view, tf, now || performance.now(), reducedMotion); } catch (error) { console.warn('Ambient layer skipped:', error); }
 }
 
 function portrait(id, group, name) {

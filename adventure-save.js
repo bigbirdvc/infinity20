@@ -20,7 +20,7 @@ export function decode(raw,now=Date.now()){
  if(s.enemyOverrides&&(typeof s.enemyOverrides!=='object'||Array.isArray(s.enemyOverrides)||Object.keys(s.enemyOverrides).length>7||Object.values(s.enemyOverrides).some(kind=>!ENEMIES.includes(kind))))return null;
  // Earlier saves used a different generated layout. Preserve accumulated progress,
  // equipment and identity, and begin the current map safely on the new layout.
- if(![3,4,5,6,7].includes(s.generation)){startMap(s);s.card=null;return {state:s,savedAt:Math.min(now,data.savedAt),migrated:true};}
+ if(![3,4,5,6,7,8].includes(s.generation)){startMap(s);s.card=null;return {state:s,savedAt:Math.min(now,data.savedAt),migrated:true};}
  const w=worldFor(s);if(Object.keys(s.enemyOverrides||{}).some(id=>!w.stops.some(o=>o.id===id&&o.type==='combat')))return null;
  if(!Number.isInteger(s.stop)||s.stop<0||s.stop>=w.stops.length||!(s.visited instanceof Set)||!(s.completedQuests instanceof Set)||!['plan','walk','combat','visit','return','recovery'].includes(s.stage))return null;
  if(s.walkStep!==undefined&&(!Number.isFinite(s.walkStep)||s.walkStep<=0||s.walkStep>10))return null;
@@ -28,7 +28,7 @@ export function decode(raw,now=Date.now()){
  if(s.fraction<0||s.fraction>1||s.timer<0||s.recovery<0||s.recovery>10||s.mapElapsed<0||s.mapElapsed>1000||!Number.isInteger(s.x)||!Number.isInteger(s.y)||!w.tiles[s.y]?.[s.x]||!Array.isArray(s.route)||s.route.length>500||s.route.some(p=>!Number.isInteger(p.x)||!Number.isInteger(p.y)||!w.tiles[p.y]?.[p.x]||!isWalkable(w,p.x,p.y)))return null;
  if([...s.completedQuests].some(q=>!Number.isInteger(q)||q<0||q>=w.quests.length)||[...s.visited].some(id=>!w.stops.some(o=>o.id===id)))return null;
  if(!s.checkpoint||!Number.isInteger(s.checkpoint.x)||!Number.isInteger(s.checkpoint.y)||!isWalkable(w,s.checkpoint.x,s.checkpoint.y))return null;
- let prior=s;for(const p of s.route){if(Math.abs(p.x-prior.x)+Math.abs(p.y-prior.y)!==1)return null;prior=p;}
+ let prior=s;for(const p of s.route){const dx=Math.abs(p.x-prior.x),dy=Math.abs(p.y-prior.y);if(s.generation>=8?Math.max(dx,dy)!==1:dx+dy!==1)return null;prior=p;}
  if(s.target&&s.target.type==='combat'&&!ENEMIES.includes(s.target.kind))return null;
  if(s.stage!=='plan'&&(!s.target||s.target.id!==w.stops[s.stop].id))return null;
  if(['combat','recovery','return'].includes(s.stage)&&(!s.enemy||!Number.isFinite(s.enemy.hp)||s.enemy.hp<=0||s.enemy.hp>1||typeof s.enemy.level!=='bigint'||!Number.isInteger(s.enemy.seed)||!Number.isFinite(s.enemy.offset)||s.enemy.offset< -2||s.enemy.offset>4||!Number.isInteger(s.enemy.retries)||s.enemy.retries<0||s.enemy.retries>1))return null;

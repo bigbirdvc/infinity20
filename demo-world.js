@@ -4,6 +4,8 @@ export const HEIGHT = 18;
 export const ENEMIES = ['skeleton', 'slime', 'bat', 'treant', 'goblin', 'wolf', 'orc', 'ogre', 'troll', 'spider', 'wraith', 'golem', 'drake', 'fallen-knight', 'warlock', 'bandit'];
 export const PROPS = ['chest', 'sign', 'bench', 'mushroom', 'flower', 'log', 'well', 'shrine', 'pebble', 'grave', 'campfire', 'bush', 'exit', 'npc', 'east-sign', 'south-bench'];
 const key = (x, y) => `${x},${y}`;
+const STEPS4 = [[1,0],[0,1],[-1,0],[0,-1]];
+const STEPS8 = [[1,0],[0,1],[-1,0],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
 export const titleCase = s => s.replaceAll('-', ' ').replace(/\b\w/g, c => c.toUpperCase());
 
 export function isWalkable(world, x, y) {
@@ -23,7 +25,10 @@ export function findPath(world, from, to) {
   while(heap.length){const node=pop();if(node.cost!==costs[node.id])continue;
     if(node.id===goal){const route=[];for(let id=goal;id!==start;id=parents[id])route.push({x:id%WIDTH,y:Math.floor(id/WIDTH)});return route.reverse();}
     const x=node.id%WIDTH,y=Math.floor(node.id/WIDTH);
-    for(const [dx,dy]of [[1,0],[0,1],[-1,0],[0,-1]]){const xx=x+dx,yy=y+dy;if(!isWalkable(world,xx,yy))continue;const id=index(xx,yy),cost=node.cost+(world.tiles[yy][xx].path?1:2.8);if(cost<costs[id]){costs[id]=cost;parents[id]=node.id;push({id,cost});}}
+    for(const [dx,dy]of world.diagonal?STEPS8:STEPS4){const xx=x+dx,yy=y+dy;if(!isWalkable(world,xx,yy))continue;
+      // Diagonal steps never cut a corner past water, trees or buildings.
+      if(dx&&dy&&(!isWalkable(world,x+dx,y)||!isWalkable(world,x,y+dy)))continue;
+      const id=index(xx,yy),cost=node.cost+(world.tiles[yy][xx].path?1:2.8)*(dx&&dy?Math.SQRT2:1);if(cost<costs[id]){costs[id]=cost;parents[id]=node.id;push({id,cost});}}
   }
   return null;
 }
